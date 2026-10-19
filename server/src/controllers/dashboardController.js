@@ -2,10 +2,15 @@ const Candidate = require("../models/Candidate");
 
 exports.getDashboardStats = async (req, res) => {
   try {
-    // Count all candidates
-    const totalCandidates = await Candidate.countDocuments();
+    // Only count candidates belonging to the logged-in user.
+    const userId = req.user.userId;
 
-    // Count candidates currently in each hiring stage
+    // Total candidates owned by this user.
+    const totalCandidates = await Candidate.countDocuments({
+      userId,
+    });
+
+    // Count candidates in each hiring stage for this user.
     const stages = [
       "Applied",
       "Screening",
@@ -18,21 +23,26 @@ exports.getDashboardStats = async (req, res) => {
     const stageStats = await Promise.all(
       stages.map(async (stage) => ({
         stage,
-        count: await Candidate.countDocuments({ stage }),
+        count: await Candidate.countDocuments({
+          userId,
+          stage,
+        }),
       }))
     );
 
-    // Active candidates exclude rejected and hired candidates
+    // Active candidates exclude rejected and hired candidates.
     const activeCandidates = await Candidate.countDocuments({
+      userId,
       stage: { $nin: ["Rejected", "Hired"] },
     });
 
-    // Count hired candidates
+    // Count candidates hired by this user.
     const hiredCandidates = await Candidate.countDocuments({
+      userId,
       stage: "Hired",
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       stats: {
         totalCandidates,
@@ -42,9 +52,11 @@ exports.getDashboardStats = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({
+    console.error("Dashboard statistics error:", error);
+
+    return res.status(500).json({
       success: false,
-      message: "Failed to fetch dashboard statistics",
+      message: "Failed to fetch dashboard statistics.",
     });
   }
 };

@@ -15,7 +15,7 @@ export default function AuthGuard({
 
   useEffect(() => {
     // Allow users to access the login page without authentication
-    if (pathname === "/login") {
+    if (pathname === "/login" || pathname === "/register") {
       setAuthorized(true);
       return;
     }

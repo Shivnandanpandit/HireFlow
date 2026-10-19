@@ -1,10 +1,11 @@
 const Candidate = require("../models/Candidate");
+
 // Handle duplicate email and Mongoose validation errors
 function handleCandidateError(error, res) {
   if (error.code === 11000) {
     return res.status(409).json({
       success: false,
-      message: "A candidate with this email already exists.",
+      message: "A candidate with this email already exists in your workspace.",
     });
   }
 
@@ -30,27 +31,30 @@ function handleCandidateError(error, res) {
   });
 }
 
-// GET: Retrieve all candidates with optional search and filtering
+// GET: Retrieve only the logged-in user's candidates
 exports.getCandidates = async (req, res) => {
   try {
     const { search, stage, position } = req.query;
 
-    const filter = {};
+    const filter = {
+      userId: req.user.userId,
+    };
 
-    // Search candidates by name or email
     if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
+      filter.$and = [
+        {
+          $or: [
+            { name: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } },
+          ],
+        },
       ];
     }
 
-    // Filter by hiring stage
     if (stage) {
       filter.stage = stage;
     }
 
-    // Filter by job position
     if (position) {
       filter.position = { $regex: position, $options: "i" };
     }
@@ -59,50 +63,45 @@ exports.getCandidates = async (req, res) => {
       createdAt: -1,
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: candidates.length,
       candidates,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return handleCandidateError(error, res);
   }
 };
 
-// GET: Retrieve one candidate by ID
+// GET: Retrieve one candidate belonging to the logged-in user
 exports.getCandidateById = async (req, res) => {
   try {
-    const candidate = await Candidate.findById(req.params.id);
+    const candidate = await Candidate.findOne({
+      _id: req.params.id,
+      userId: req.user.userId,
+    });
 
     if (!candidate) {
       return res.status(404).json({
         success: false,
-        message: "Candidate not found",
+        message: "Candidate not found.",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       candidate,
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid candidate ID",
-    });
+    return handleCandidateError(error, res);
   }
 };
 
-// POST: Create a new candidate
-// POST: Create a new candidate
+// POST: Create a candidate owned by the logged-in user
 exports.createCandidate = async (req, res) => {
   try {
     const { name, email, position } = req.body;
 
-    // Validate required fields
     if (
       typeof name !== "string" ||
       !name.trim() ||
@@ -117,33 +116,39 @@ exports.createCandidate = async (req, res) => {
       });
     }
 
-    // Validate email format
+    const normalizedEmail = email.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    if (!emailRegex.test(email.trim())) {
+    if (!emailRegex.test(normalizedEmail)) {
       return res.status(400).json({
         success: false,
         message: "Please enter a valid email address.",
       });
     }
 
-    // Normalize email before checking for duplicates
-    const normalizedEmail = email.trim().toLowerCase();
-
     const existingCandidate = await Candidate.findOne({
+      userId: req.user.userId,
       email: normalizedEmail,
     });
 
     if (existingCandidate) {
       return res.status(409).json({
         success: false,
-        message: "A candidate with this email already exists.",
+        message: "A candidate with this email already exists in your workspace.",
       });
     }
 
-    // Create candidate; the unique index also protects against race conditions
+    // Never accept the owner ID from the request body.
+    // Ownership must come from the verified JWT.
+    const {
+      userId: ignoredUserId,
+      _id: ignoredId,
+      ...candidateData
+    } = req.body;
+
     const candidate = await Candidate.create({
-      ...req.body,
+      ...candidateData,
+      userId: req.user.userId,
       name: name.trim(),
       email: normalizedEmail,
       position: position.trim(),
@@ -159,12 +164,11 @@ exports.createCandidate = async (req, res) => {
   }
 };
 
-// PUT: Update candidate details
+// PUT: Update only a candidate owned by the logged-in user
 exports.updateCandidate = async (req, res) => {
   try {
     const { name, email, position, experience } = req.body;
 
-    // Validate provided required fields
     if (
       (name !== undefined && (typeof name !== "string" || !name.trim())) ||
       (email !== undefined && (typeof email !== "string" || !email.trim())) ||
@@ -177,7 +181,6 @@ exports.updateCandidate = async (req, res) => {
       });
     }
 
-    // Validate email when provided
     if (email !== undefined) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -191,7 +194,6 @@ exports.updateCandidate = async (req, res) => {
       req.body.email = email.trim().toLowerCase();
     }
 
-    // Validate experience when provided
     if (experience !== undefined) {
       const numericExperience = Number(experience);
 
@@ -213,13 +215,22 @@ exports.updateCandidate = async (req, res) => {
       req.body.experience = numericExperience;
     }
 
-    // Normalize supplied text fields
     if (name !== undefined) req.body.name = name.trim();
     if (position !== undefined) req.body.position = position.trim();
 
-    const candidate = await Candidate.findByIdAndUpdate(
-      req.params.id,
-      req.body,
+    // Do not allow a client to change candidate ownership.
+    const {
+      userId: ignoredUserId,
+      _id: ignoredId,
+      ...updateData
+    } = req.body;
+
+    const candidate = await Candidate.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.user.userId,
+      },
+      updateData,
       {
         new: true,
         runValidators: true,
@@ -243,7 +254,7 @@ exports.updateCandidate = async (req, res) => {
   }
 };
 
-// PATCH: Update hiring stage
+// PATCH: Update the stage of an owned candidate
 exports.updateCandidateStage = async (req, res) => {
   try {
     const { stage } = req.body;
@@ -260,12 +271,15 @@ exports.updateCandidateStage = async (req, res) => {
     if (!validStages.includes(stage)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid hiring stage",
+        message: "Invalid hiring stage.",
       });
     }
 
-    const candidate = await Candidate.findByIdAndUpdate(
-      req.params.id,
+    const candidate = await Candidate.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        userId: req.user.userId,
+      },
       { stage },
       { new: true, runValidators: true },
     );
@@ -273,43 +287,40 @@ exports.updateCandidateStage = async (req, res) => {
     if (!candidate) {
       return res.status(404).json({
         success: false,
-        message: "Candidate not found",
+        message: "Candidate not found.",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Hiring stage updated successfully",
+      message: "Hiring stage updated successfully.",
       candidate,
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid candidate ID",
-    });
+    return handleCandidateError(error, res);
   }
 };
 
-// DELETE: Delete a candidate
+// DELETE: Delete only a candidate owned by the logged-in user
 exports.deleteCandidate = async (req, res) => {
   try {
-    const candidate = await Candidate.findByIdAndDelete(req.params.id);
+    const candidate = await Candidate.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.user.userId,
+    });
 
     if (!candidate) {
       return res.status(404).json({
         success: false,
-        message: "Candidate not found",
+        message: "Candidate not found.",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: "Candidate deleted successfully",
+      message: "Candidate deleted successfully.",
     });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: "Invalid candidate ID",
-    });
+    return handleCandidateError(error, res);
   }
 };

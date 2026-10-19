@@ -2,6 +2,13 @@ const mongoose = require("mongoose");
 
 const candidateSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+
     name: {
       type: String,
       required: [true, "Candidate name is required"],
@@ -41,8 +48,7 @@ const candidateSchema = new mongoose.Schema(
       default: 0,
       validate: {
         validator: function (value) {
-          return Number.isFinite(value) &&
-            Math.round(value * 2) === value * 2;
+          return Number.isFinite(value) && Math.round(value * 2) === value * 2;
         },
         message: "Experience must use increments of 0.5 years",
       },
@@ -55,14 +61,7 @@ const candidateSchema = new mongoose.Schema(
 
     stage: {
       type: String,
-      enum: [
-        "Applied",
-        "Screening",
-        "Interview",
-        "Offer",
-        "Hired",
-        "Rejected",
-      ],
+      enum: ["Applied", "Screening", "Interview", "Offer", "Hired", "Rejected"],
       default: "Applied",
     },
 
@@ -73,10 +72,10 @@ const candidateSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Prevent duplicate email addresses at the database level.
-candidateSchema.index({ email: 1 }, { unique: true });
+candidateSchema.index({ userId: 1, email: 1 }, { unique: true });
 
 module.exports = mongoose.model("Candidate", candidateSchema);
