@@ -15,6 +15,7 @@ type Candidate = {
   skills: string[];
   stage: string;
   createdAt: string;
+  notes?: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
